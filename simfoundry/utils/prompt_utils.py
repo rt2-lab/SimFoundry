@@ -127,8 +127,10 @@ def prompt_object_setlist_specific_floorplane_v2(floor_category):
     '''
     
 # generate bbox from Gemini
-def prompt_object_setlist_specific_floorplane_v3(floor_category):
-    return f"You are helping an image segmentation system.\n\n" + \
+def prompt_object_setlist_specific_floorplane_v3(floor_category, bbox_format="yxyx"):
+    if bbox_format not in {"yxyx", "xyxy"}:
+        raise ValueError(f"Unsupported bounding box format: {bbox_format}")
+    prompt = f"You are helping an image segmentation system.\n\n" + \
     "### Task Description ###\n\n" + \
     f"The user will give you an image. Please provide a list of all visible objects on the {floor_category} plane. " + \
     "For each object, return exactly three short names in the format: primary name / alias 1 / alias 2, and also return one bounding box.\n\n" + \
@@ -233,6 +235,13 @@ def prompt_object_setlist_specific_floorplane_v3(floor_category):
     }}
     '''
    
+
+
+    if bbox_format == "xyxy":
+        prompt = prompt.replace("box_2d", "bbox_xyxy").replace(
+            "[ymin, xmin, ymax, xmax]", "[xmin, ymin, xmax, ymax]"
+        )
+    return prompt
 
 
 def prompt_floor_setlist():

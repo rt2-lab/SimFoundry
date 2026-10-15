@@ -14,6 +14,7 @@ from pathlib import Path
 import json
 from simfoundry.utils.asset_conversion_utils import import_custom_object, import_articulated_object
 from simfoundry.models.vlm import Gemini
+from simfoundry.models.text_vlm import create_text_vlm
 import hydra
 import trimesh
 import random
@@ -273,7 +274,7 @@ def main(cfg):
     logger.info("="*60)
 
     # Create VLM for physical property annotation
-    vlm = Gemini(
+    vlm = create_text_vlm(
         project=cfg.gcloud_project,
         location="global",
         model=vlm_model,

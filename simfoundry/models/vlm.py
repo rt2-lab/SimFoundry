@@ -1151,11 +1151,36 @@ class FLUX1(VLM_API):
                 "The Flux backend requires a diffusers version that provides "
                 "FluxKontextPipeline. Install or upgrade the project's diffusers dependency."
             )
-        self.pipeline = pipeline_cls.from_pretrained(self.MODEL_IDS[model], torch_dtype=dtype)
+        model_id = self.MODEL_IDS[model]
+        quantization = os.environ.get("SIMFOUNDRY_FLUX_QUANTIZATION", "none")
+        components = {}
+        if quantization == "nf4":
+            # Stage 5 also keeps SAM3 and depth models resident. Quantize the two
+            # large FLUX components so image editing fits alongside that stack.
+            from diffusers import BitsAndBytesConfig as DiffusersQuantConfig, FluxTransformer2DModel
+            from transformers import BitsAndBytesConfig as TransformersQuantConfig, T5EncoderModel
+            options = dict(load_in_4bit=True, bnb_4bit_quant_type="nf4",
+                           bnb_4bit_compute_dtype=dtype, bnb_4bit_use_double_quant=True)
+            components["transformer"] = FluxTransformer2DModel.from_pretrained(
+                model_id, subfolder="transformer", torch_dtype=dtype,
+                quantization_config=DiffusersQuantConfig(**options),
+            )
+            components["text_encoder_2"] = T5EncoderModel.from_pretrained(
+                model_id, subfolder="text_encoder_2", torch_dtype=dtype,
+                quantization_config=TransformersQuantConfig(**options),
+            )
+        elif quantization != "none":
+            raise ValueError("SIMFOUNDRY_FLUX_QUANTIZATION must be none or nf4")
+        self.pipeline = pipeline_cls.from_pretrained(model_id, torch_dtype=dtype, **components)
+        self.device = device
         if enable_cpu_offload:
             self.pipeline.enable_model_cpu_offload()
-        self.device = device
-        # self.pipeline.to(device=self.device)
+        else:
+            # enable_model_cpu_offload() normally handles moving every component to
+            # the right device as it's needed. Without it, from_pretrained() leaves
+            # non-quantized components (vae, text_encoder, ...) on CPU, so we have to
+            # place them explicitly or forward() sees a CUDA/CPU dtype mismatch.
+            self.pipeline.to(device=self.device)
 
     def __call__(
         self,

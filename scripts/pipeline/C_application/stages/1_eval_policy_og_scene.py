@@ -51,8 +51,14 @@ from simfoundry.utils.scene_utils import load_json_with_absolute_usd_paths
 # null in every config -- so importing it here failed the stage before it had
 # read a single argument. Imported at the two places that actually swap instead.
 from simfoundry.policies.gr00t import Gr00tClient
-from simfoundry.policies.openpi import OpenPIClient
-from simfoundry.policies.dreamzero import DreamZeroClient
+# openpi.py and dreamzero.py both import the native `openpi_client` pip package
+# (a separate thing from our pi05_lerobot client -- see pi05_lerobot.py's
+# module docstring) unconditionally at module scope. That package is not
+# installed in every simfoundry env, so importing it here -- regardless of
+# which policy cfg.s15_eval.policy actually selects -- failed the stage before
+# it read a single argument. Imported lazily inside load_policy()'s matching
+# branches instead, same reasoning as the object_swap_utils comment above.
+from simfoundry.policies.pi05_lerobot import PI05LerobotClient
 import os
 from datetime import datetime
 import signal
@@ -129,9 +135,26 @@ def load_policy(cfg):
     if cfg.s15_eval.policy == "gr00t":
         return Gr00tClient(host=cfg.s15_eval.host, port=cfg.s15_eval.port, api_token=None, open_loop_horizon=cfg.s15_eval.execute_horizon)
     elif cfg.s15_eval.policy == "openpi":
+        from simfoundry.policies.openpi import OpenPIClient
         return OpenPIClient(host=cfg.s15_eval.host, port=cfg.s15_eval.port, open_loop_horizon=cfg.s15_eval.execute_horizon)
     elif cfg.s15_eval.policy == "dreamzero":
+        from simfoundry.policies.dreamzero import DreamZeroClient
         return DreamZeroClient(host=cfg.s15_eval.host, port=cfg.s15_eval.port, open_loop_horizon=cfg.s15_eval.execute_horizon)
+    elif cfg.s15_eval.policy == "pi05_lerobot":
+        # LeRobot-format pi0.5 checkpoint served by a persistent process in the
+        # isolated .cache/pi05-serve-venv (NOT the native openpi package/server
+        # that OpenPIClient above talks to -- different checkpoint format). See
+        # simfoundry/policies/pi05_lerobot.py and pi05_serve/server.py.
+        return PI05LerobotClient(
+            checkpoint_path=cfg.s15_eval.pi05_checkpoint_path,
+            venv_python=cfg.s15_eval.get("pi05_venv_python", None),
+            host=cfg.s15_eval.host,
+            port=cfg.s15_eval.port,
+            device=cfg.s15_eval.get("pi05_device", "cuda"),
+            open_loop_horizon=cfg.s15_eval.execute_horizon,
+            action_dim=cfg.s15_eval.get("pi05_action_dim", 8),
+            external_server=cfg.s15_eval.get("pi05_external_server", False),
+        )
     else:
         raise ValueError(f"Invalid policy: {cfg.s15_eval.policy}")
 

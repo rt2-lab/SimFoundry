@@ -1,0 +1,32 @@
+# xArm6 camera rig: one front camera facing the robot across the workspace plus a wrist camera,
+# the two views xArm6 pi0.5 finetunes (e.g. ys903/pi05_xarm6_pick_place_50ep) are trained on.
+# Square frames like the ys903 dataset (640x640). Both are RealSense D435-class color cameras (~69 deg horizontal FOV: aperture/focal = 2*tan(34.5)).
+external_sensors:
+  - sensor_type: VisionSensor
+    name: front_cam
+    relative_prim_path: /controllable__xarm6__robot0/link_base/front_cam
+    modalities: [ rgb ]
+    sensor_kwargs:
+      image_height: 320
+      image_width: 320
+      focal_length: 1.93
+      horizontal_aperture: 2.65
+    # Robot base frame. Mimics the ys903 rig: front-left of the robot looking across the
+    # workspace, so the base shows on the right of the image. Eye (0.45, 0.65, 0.55) looking at
+    # (0.35, -0.05, 0).
+    position: [0.45, 0.65, 0.55]
+    orientation: [0.03114, 0.43824, 0.89606, 0.06368]
+    pose_frame: parent
+  - sensor_type: VisionSensor
+    name: wrist_cam
+    relative_prim_path: /controllable__xarm6__robot0/link6/wrist_cam
+    modalities: [ rgb ]
+    sensor_kwargs:
+      image_height: 320
+      image_width: 320
+      focal_length: 1.93
+      horizontal_aperture: 2.65
+    # UFactory D435i wrist mount: color optical frame in link6, USD camera convention.
+    position: [0.06746, -0.0325, 0.0237]
+    orientation: [0.70711, 0.70711, 0.0, 0.0]
+    pose_frame: parent

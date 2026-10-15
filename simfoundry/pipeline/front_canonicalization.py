@@ -189,8 +189,8 @@ def canonicalize_front(mesh, render_dir, *, vlm=None, photo_path=None, category=
             image_paths.append(str(photo_path))
 
         if vlm is None:
-            from simfoundry.models.vlm import Gemini
-            vlm = Gemini(project=gcloud_project, location="global", model=model)
+            from simfoundry.models.text_vlm import create_text_vlm
+            vlm = create_text_vlm(project=gcloud_project, location="global", model=model)
         result = vlm(
             prompt=front_pick_prompt(labels, category=category, has_photo=has_photo),
             image_paths=image_paths,

@@ -1,0 +1,70 @@
+# ==============================================================================
+# HTCondor submit file: pi0.5 finetune on the scripted xArm6 sim demos, CHTC GPU Lab
+# ==============================================================================
+#
+# From ~/simfoundry_chtc on the CHTC submit node (stage_to_chtc.sh copies this directory and
+# finetune_pi05.sh there; see README.md):
+#   condor_submit train.sub
+#   condor_submit train.sub exp_name=bs32 batch_size=32 steps=5000 save_freq=2500
+#   condor_submit train.sub exp_name=full extra_args="--policy.train_expert_only=false" min_gpu_mem=80000
+#
+# W&B: export WANDB_API_KEY (and WANDB_ENTITY) in the submit shell; getenv passes them through.
+# Never put the key in this file.
+# ==============================================================================
+
+universe                = container
+container_image         = docker://$(dockerhub_user)/simfoundry_lerobot_train:0.6.1
+dockerhub_user          = tdu35
+
+staging                 = /staging/t/tdu35/simfoundry
+dataset_name            = xarm6_cube_in_box_sim
+base_name               = pi05_droid_jointpos
+exp_name                = xarm6_sim_$(Cluster)
+
+# Training knobs, read by finetune_pi05.sh. Defaults reproduce the local run.
+batch_size              = 8
+steps                   = 20000
+save_freq               = 5000
+extra_args              =
+wandb_project           = pi05_xarm6_sim
+
+executable              = run_train_chtc.sh
+arguments               = $(exp_name) $(dataset_name) $(base_name)
+
+should_transfer_files   = YES
+when_to_transfer_output = ON_EXIT_OR_EVICT
+transfer_input_files    = finetune_pi05.sh, \
+                          file://$(staging)/$(dataset_name)_dataset.tar, \
+                          file://$(staging)/$(base_name)_base.tar
+transfer_output_files   = checkpoint_bundle.tar
+transfer_output_remaps  = "checkpoint_bundle.tar = file://$(staging)/checkpoints/$(exp_name).tar"
+
+getenv                  = WANDB_API_KEY, WANDB_ENTITY
+environment             = "BATCH_SIZE=$(batch_size) STEPS=$(steps) SAVE_FREQ=$(save_freq) WANDB_PROJECT=$(wandb_project) TRAIN_EXTRA_ARGS='$(extra_args)'"
+
+log                     = logs/train_$(Cluster).log
+output                  = logs/train_$(Cluster).out
+error                   = logs/train_$(Cluster).err
+stream_output           = True
+stream_error            = True
+
+# Frozen vision encoder + action expert only needs ~16 GB, so any GPU-Lab card >= 40 GB works
+# (L40 / L40S 45 GB, A100 40/80 GB, H100 80 GB, H200 141 GB). Full finetune: min_gpu_mem=80000.
+min_gpu_mem             = 40000
+request_gpus            = 1
+request_cpus            = 8
+request_memory          = 64GB
+# base checkpoint ~7 GB + 4 saved steps x ~11 GB + bundle
+request_disk            = 120GB
+gpus_minimum_memory     = $(min_gpu_mem)
+gpus_minimum_capability = 8.0
+
++WantGPULab             = true
+# 20k steps at batch 8 took ~6 h on an RTX 5090; "short" (<= 12 h) gets the most GPUs.
++GPUJobLength           = "short"
++is_resumable           = false
+
+# torch cu126 wheels need a CUDA 12.6+ driver; /staging inputs need staging access.
+Requirements            = (Target.HasCHTCStaging == true) && (Target.CUDADriverVersion >= 12.6)
+
+queue 1

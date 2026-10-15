@@ -153,6 +153,7 @@ s5_scene:     # env: simfoundry
   start_iter: null
   end_iter: null
   force_categories: null
+  reviewed_instances: null  # Optional frame-bound JSON of ordered, reviewed SAM masks.
   use_feedback: false   # If true, use rerun_feedback.json from 5b_visualize_decomposition.py
   use_upsampled_source_image: true   # If true, seed decomposition with the removal model's upsampled source (source_padded_resized_upsampled.png). If false, use source_padded_resized.png as-is, skipping the upsample call.
   removal_outline_color: [0, 255, 0]
@@ -463,10 +464,25 @@ s15_eval:       # env: b1k -- Evaluate Gr00t checkpoint on OmniGibson scene
   host: "localhost"
   # policy : openpi # [openpi, gr00t]
   # port: 8000 # 8000 for OpenPI, 5555 for Gr00t
-  policy : gr00t # [openpi, gr00t]
-  port: 5555 # 8000 for OpenPI, 5555 for Gr00t
+  policy : gr00t # [openpi, gr00t, dreamzero, pi05_lerobot]
+  port: 5555 # 8000 for OpenPI, 5555 for Gr00t, 8420 for pi05_lerobot
   # port: 5555 # 8000 for OpenPI, 5555 for Gr00t
   out_dir: "${root_dir}/${scene_name}/${s15_eval.out_dirname}/${s15_eval.policy}"
+  # --- pi05_lerobot-only settings (ignored by gr00t/openpi/dreamzero) ---
+  # LeRobot-format pi0.5 checkpoint directory (NOT a native-openpi checkpoint --
+  # see simfoundry/policies/pi05_lerobot.py for why these need different clients).
+  pi05_checkpoint_path: "/home/tingting/Documents/allocator/models/pi05_base"
+  # Python interpreter inside the isolated venv that has lerobot[transformers-dep]
+  # installed (built with `uv venv .cache/pi05-serve-venv --python 3.12`; see
+  # simfoundry/policies/pi05_serve/server.py). null = default to
+  # <repo_root>/.cache/pi05-serve-venv/bin/python
+  pi05_venv_python: null
+  pi05_device: cuda                       # cpu/cuda device the pi05 server loads the policy onto
+  pi05_action_dim: 8                       # Leading action dims to keep (checkpoint pads actions to 32)
+  # If true, connect to an already-running pi05 server at host:port instead of
+  # spawning + managing one (useful for iterating without repaying the ~1-2 min
+  # checkpoint load on every hydra run).
+  pi05_external_server: false
   asset_id: franka                        # Normalization stats ID: 'franka' (joint pos) or 'droid' (joint vel)
   scene_json: droid_desk_stack_dishware                # Path to scene JSON (null = use s14_og output)
   use_floor_plane: true
@@ -484,6 +500,14 @@ s15_eval:       # env: b1k -- Evaluate Gr00t checkpoint on OmniGibson scene
   interactive: false                      # If true, drops into IPython for interactive evaluation
   save_video: true                        # If true, saves video of policy observations per episode
   video_fps: 10                             # FPS for saved videos
+  # 1_eval_policy_og_scene.py's capture_video_frame() concatenates base_1/base_2/wrist
+  # frames along axis=1 (width), which requires them to already share a height. The two
+  # external cams are forced to 720x1280 above (s15_eval loop's "Set image resolution..."
+  # block), but the wrist cam's resolution comes from the robot's own sensor config and can
+  # differ (seen on cube2_scene: wrist cam renders at 128x128, raising a np.concatenate
+  # ValueError on the very first frame). null skips the resize (fine as long as all three
+  # happen to already match); set to a common [H, W] like [224, 224] whenever they don't.
+  video_resolution: [224, 224]
 s15_annotate:     # env: b1k
   rerun: true
   out_dirname: s15_annotation

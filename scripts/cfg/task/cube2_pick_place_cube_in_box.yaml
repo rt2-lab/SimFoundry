@@ -1,0 +1,143 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Subtask: "pick up cube and place it into box", evaluated against the
+# `cube2_scene` reconstruction. This assumes a human already opened the box
+# before the episode starts (i.e. this task tests pick-and-place into an
+# already-open container, not the open-the-box skill itself), which is why the
+# box's lid joint is pinned to its open position via `group_init_joint_positions`
+# below instead of being left at its on-disk default (closed) pose.
+#
+# Based on scripts/cfg/task/droid/droid_desk_put_cup_in_bowl.yaml (same field set,
+# cup/bowl -> cube/box).
+#
+# Object names from Data/cube2_scene/s11_sim/scene_objects_info.json:
+#   iter_0 = category "toolbox" (model hrgpsy)    -> box
+#   iter_1 = category "blue_cube" (model gusrjw)  -> cube (there's also an
+#            unused "yellow_cube" / iter_2 in the scene; this subtask only
+#            needs one cube and the prompt says "a cube", so blue_cube was
+#            picked arbitrarily -- iter_2/yellow_cube is simply not in any
+#            semantic group below and is therefore an inert distractor)
+#
+# Box lid joint from Data/cube2_scene/s9_articulate_objects/cube2_scene/toolbox/
+# results/mobility.urdf: "toolbox_base_link_to_lid_link", revolute,
+# limits [0.0 (closed), 1.5708 rad / 90 deg (open)]. Set to 1.4 rad below --
+# near fully open, leaving a touch of margin, per the task's "already opened by
+# a human" premise.
+#
+# NOTE (not blocking, carried over from the scene-reconstruction handoff): the
+# lid's mass/friction in results/physics_properties.json and
+# s11_sim/scene_objects_info.json are stale (estimated back when the joint was
+# misclassified as fixed; the 5b physics-estimation sub-step needs Gemini
+# credentials that weren't available and fell back to old numbers). The joint
+# axis/pivot/limits used here are fresh and correct -- only the lid's physical
+# mass/friction might be off, which could show up as odd lid physics, not as a
+# wrong open position.
+task_name: cube2_pick_place_cube_in_box
+og_task_config:
+  type: PickPlaceTask
+  activity_name: ${task_name}
+  semantic_group_mapping:
+    robot: [agent]
+    cube: [blue_cube]
+    box: [toolbox]
+  init_predicates_all: null
+  init_predicates_any: null
+  init_predicates_specific: null
+  goal_predicates_all:
+    - state: InsideAABB
+      value: true
+      group: cube
+      other_group: box
+      state_kwargs:
+        volume_threshold: 0.50 # At least 50% of cube's AABB volume must be inside box
+  goal_predicates_any:
+    - state: Touching
+      state_kwargs: null
+      value: false
+      group: robot
+      other_group: cube
+  goal_predicates_specific: null
+  # Milestone predicates - tracked during episode (once achieved, remembered)
+  # Sequential: each milestone can only be checked if its prerequisites are satisfied
+  milestone_predicates:
+    - name: touched_cube
+      state: Touching
+      state_kwargs: null
+      value: true
+      group: robot
+      other_group: cube
+      requires: []
+    - name: picked_cube
+      state: IsGrasping
+      state_kwargs: null
+      value: true
+      group: robot          # Check if robot is grasping
+      other_group: cube     # the cube
+      requires: [touched_cube]
+    - name: cube_in_box
+      state: InsideAABB
+      state_kwargs:
+        volume_threshold: 0.50
+      value: true
+      group: cube
+      other_group: box
+      requires: []
+  robot_pose: null
+  robot_xyz_randomization: null
+  robot_z_rot_randomization: null
+  robot_joint_randomization: null
+  # ground_plane_z_offset: 0.02
+  # ground_plane_z_randomization: 0.1 # +- 0.10m
+  camera_look_at_point: null  # auto-inferred from camera ray-ground plane intersection
+  # camera_randomization:
+  #   delta_r: 0.05        # +/- 5cm distance variation
+  #   delta_theta: 0.10    # +/- ~5.7 deg polar angle variation (radians)
+  #   delta_phi: 0.10      # +/- ~5.7 deg azimuthal variation (radians)
+  group_init_relative_poses: null
+  # "Box already open" initial condition: PickPlaceTask.group_init_joint_positions
+  # maps a semantic group name to {joint_name: joint_position} and is applied on
+  # every env.reset() (see simfoundry/tasks/pick_place_task.py's docstring --
+  # this mechanism already exists for exactly this use case, "e.g., to set a
+  # mailbox lid to open position", so no code change to pick_place_task.py was
+  # needed for this task). Joint name + limits are from the toolbox's mobility.urdf
+  # (see header note above); 1.4 rad is near the 1.5708 rad (90 deg) open limit.
+  group_init_joint_positions:
+    box:
+      toolbox_base_link_to_lid_link: 1.4
+  group_predicate_placement: null
+  group_xyz_randomization:
+    cube: [0.1, 0.1, 0]
+    box: [0.05, 0.05, 0]
+  group_z_rot_randomization:
+    cube: 0
+    box: 0
+  # Sanity-checked against the real scene (Data/cube2_scene/s14_og/reconstructed_og_scene.json,
+  # state.registry.object_registry): robot0 pos=(-1.0, 0.0, 0.0), quat=identity; toolbox
+  # (iter_0) world pos=(0.243, 0.007, 0.063); blue_cube (iter_1) world pos=(-0.237, -0.083,
+  # 0.016). Since the robot's orientation is identity, robot-base-frame = world-frame shifted
+  # by robot_pos, so: toolbox local=(1.243, 0.007, 0.063), blue_cube local=(0.763, -0.083,
+  # 0.016). Bounds below cover both positions plus their group_xyz_randomization margins
+  # (box +/-0.05, cube +/-0.1) -- the droid template's original [0.3,0.8] x-range did NOT
+  # contain either object (it was copied from a different scene's layout) and would have
+  # produced an inverted/degenerate sampling range in task_utils.randomize_object_pose.
+  #
+  # FLAG (not a workspace_bounds problem, a scene-calibration one -- not fixed here since
+  # robot placement is a scene-editing concern, not a task-config one): a ~0.76-1.3m
+  # robot-to-object distance is further than a Franka Panda's practical reach (~0.85m max),
+  # and further than every other task in this repo (droid templates assume ~0.3-0.8m). If
+  # the arm visibly can't reach the objects during eval, this is almost certainly why --
+  # worth a human pass on robot0's placement in the light editor before trusting a "failure"
+  # as a statement about the policy.
+  workspace_bounds:
+    lower: [0.6, -0.2, -0.05]
+    upper: [1.35, 0.1, 0.3]
+  prevent_predicate_overlap: true
+  overlap_separation_multiplier: 1.5
+  additional_objects: null
+  termination_config:
+    max_steps: 1000
+  reward_config:
+    r_potential: 1.0
+  include_obs: false
+  hdr_background_name: null

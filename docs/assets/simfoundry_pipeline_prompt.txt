@@ -1,0 +1,17 @@
+Use case: infographic-diagram.
+Asset type: academic pipeline figure for SimFoundry Chinese demo documentation.
+Create an elegant concise landscape scientific workflow diagram, approximately 2.1:1 aspect ratio, very high resolution, white/light ivory background, dark navy serif typography, thin grey arrows, rounded rectangles, dashed grey rounded panel outlines, subdued blue/orange/teal/purple accent colors. Reference image 1 is ONLY a STYLE reference (three dashed panels, bold serif panel headings, academic layout, small explanatory labels). Do not copy its model architecture, training loss, shared DiT, or action image content.
+Title centered: "SimFoundry: From Real Video to Simulation"
+Three panels. Left panel 29% width, middle 44%, right 27%. Make text large, readable, sparse. Simple clean illustrative miniature tabletop with radio components (grey enclosure plates, circuit board, speaker, orange screwdriver) and white robot arm. Illustrations are schematic, not claimed experimental renders.
+Panel (a) heading "(a) Observe & decompose". Vertical stages:
+"Real-world video" with three tiny video frames of a tabletop lateral camera sweep.
+down arrow to "Depth + camera geometry" with tiny RGB and depth tiles; smaller "DA3 / stereo".
+down arrow to "Canonical frame + support plane" with planar tabletop schematic.
+down arrow to "Object-wise decomposition" with three isolated colored mask tiles. smaller "SAM3 + VLM".
+Under it a small loop callout: "Select → remove → update depth", with curved loop arrow. Smaller below: "Optional: reviewed masks".
+Panel (b) heading "(b) Reconstruct & compile". Two input strips at top: "Object crop" (small orange screwdriver and board image tiles) and "Observed point cloud" (small blue dotted component).
+Object crop down to "Image completion" smaller "Gemini / FLUX", then down to "Textured 3D mesh" smaller "Hunyuan / TRELLIS.2 / Pixal3D", then arrow to "Scale + pose fitting" smaller "Point registration + FoundationPose". A horizontal arrow from observed point cloud into scale + pose fitting. Then vertical arrow into "Physics-ready assets" smaller "Collision geometry • mass • friction • URDF". Small dashed side note "Optional articulation" points into Physics-ready assets. Then "Physics settling → USD import" smaller "PyBullet → OmniGibson / PhysX". Final large highlighted box "Simulation scene" with miniature reconstructed tabletop and white robot arm. Tiny footer "Scene JSON + USD assets".
+Panel (c) heading "(c) Augment & apply". At top two branches from the scene: "Digital cousins" with three differently shaped small object thumbnails and "Scene variations" with two tiny layouts. Join arrows into "Task proposals" smaller "Task YAML + predicates". Then small pale box "Human review / scene editor". Then lower three compact parallel output blocks "Smoke test", "Teleoperation", "Policy evaluation". At bottom a small dashed secondary path "Source demos → waypoints → replay" with label "Optional data generation". No training or transfer success claim.
+Between panels clear left-to-right arrows, and label above panel a to b arrow "per-object evidence"; b to c arrow "sim-ready scene".
+Bottom small centered note: "Solid flow: reconstruction core   ·   Dashed callouts: optional extensions".
+Keep comfortable negative space. Accurately render all English labels. No dense paragraphs, equations, logos, watermark, giant decoration or shadows. Only one figure.

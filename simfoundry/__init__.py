@@ -29,3 +29,4 @@ def configure_omnigibson_data_path(*, force: bool = True) -> str:
 # For importing specific OmniGibson dependences
 def import_og_dependencies():
     from simfoundry.tasks.pick_place_task import PickPlaceTask
+    from simfoundry.robots.xarm6 import XArm6

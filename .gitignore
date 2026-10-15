@@ -49,3 +49,29 @@ Miniforge3-Linux-x86_64.sh
 .zprofile
 .zshrc
 scripts/experiments/
+
+# Secrets and machine-local environments
+.env
+.env.*
+!.env.example
+.venv/
+venv/
+*.pem
+*.key
+
+# Training outputs, checkpoints, and experiment logs
+/outputs/
+wandb/
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+
+# Python test and tooling caches
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.DS_Store

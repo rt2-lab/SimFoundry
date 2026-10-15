@@ -16,6 +16,7 @@ from omnigibson.object_states import Open, ToggledOn
 from omnigibson.object_states.object_state_base import REGISTERED_OBJECT_STATES, RelativeObjectState
 from omnigibson.reward_functions.reward_function_base import BaseRewardFunction
 from omnigibson.robots import BaseRobot, FrankaPanda, Yam
+from simfoundry.robots.xarm6 import XArm6
 from omnigibson.scenes.scene_base import Scene
 from omnigibson.tasks.task_base import BaseTask
 from omnigibson.termination_conditions.timeout import Timeout
@@ -377,7 +378,7 @@ class PickPlaceTask(BaseTask):
 
         # Set hardcoded tuned gains
         for r in env.robots:
-            assert isinstance(r, (FrankaPanda, Yam)), f"Robot {r.name} not supported!"
+            assert isinstance(r, (FrankaPanda, Yam, XArm6)), f"Robot {r.name} not supported!"
             gains = GAINS[r.model_name]
             idx = 0
             for jnt in r.joints.values():

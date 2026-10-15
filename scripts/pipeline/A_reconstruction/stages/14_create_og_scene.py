@@ -34,8 +34,10 @@ from simfoundry.utils.og_utils import set_obj_materials
 import numpy as np
 import sys
 
-from simfoundry import CFG_DIR
+from simfoundry import CFG_DIR, import_og_dependencies
 
+# Registers SimFoundry's own robot classes (e.g. XArm6) so s14_og.robot_config.type can name them.
+import_og_dependencies()
 
 bootstrap_hydra_workdir(__file__)
 

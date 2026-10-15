@@ -12,7 +12,7 @@ This script:
 from simfoundry.utils.prompt_utils import prompt_list_articulated_objects, parse_json_response
 from simfoundry.utils.processing_utils import dump_json
 from simfoundry.utils.python_utils import sanitize_path_component
-from simfoundry.models.vlm import Gemini
+from simfoundry.models.text_vlm import create_text_vlm
 from omegaconf import OmegaConf
 from pathlib import Path
 import shutil
@@ -261,9 +261,16 @@ def run_articulation(config_name: str, conda_env: str, simfoundry_path: str, exp
     """Run the articulation workflow"""
   
     env_path = get_conda_env_path(conda_env)
-    
+
+    # Resolve the real base conda executable rather than relying on PATH: a bare
+    # "conda" can resolve to a different env's own vendored copy (e.g. simfoundry's),
+    # whose `run --prefix` then silently executes under ITS OWN interpreter instead
+    # of activating the target env — breaking editable-installed packages like
+    # articulate_anything (surfaces as ModuleNotFoundError despite pip show working).
+    conda_exe = os.environ.get("CONDA_EXE") or shutil.which("conda") or "conda"
+
     cmd = [
-        "conda", "run", "--prefix", env_path, "--no-capture-output", "--cwd", simfoundry_path,
+        conda_exe, "run", "--prefix", env_path, "--no-capture-output", "--cwd", simfoundry_path,
         "python", f"{simfoundry_path}/complete_workflow.py", "--config-name", config_name
     ]
     
@@ -315,8 +322,9 @@ def main(cfg):
             logger.warning(f"Missing image for {obj_name}")
 
     # Infer articulated candidates from the source scene frame and the exact list of
-    # valid detected objects, via Vertex AI Gemini.
-    vlm = Gemini(
+    # valid detected objects. Backend chosen by SIMFOUNDRY_TEXT_VLM (gemini by
+    # default, qwen to route through the local model instead of Vertex AI).
+    vlm = create_text_vlm(
         project=cfg.gcloud_project,
         location="global",
         model=cfg.s9_articulate_objects.vlm_model,

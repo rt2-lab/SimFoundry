@@ -45,6 +45,7 @@ UPSAMPLE_MODELS = {
     "flux",
 }
 
+from simfoundry.models.text_vlm import create_text_vlm
 from simfoundry import CFG_DIR
 
 
@@ -125,6 +126,11 @@ def main(cfg):
             model="FLUX.1-Kontext-dev",
             dtype=torch.bfloat16,
             device="cuda",
+            # CPU offload keeps the full model resident in host RAM and shuffles
+            # submodules to GPU per call; on this shared box that competes with other
+            # users' processes for host RAM and swap. With the GPU otherwise free,
+            # keeping FLUX fully resident on GPU avoids the host-RAM pressure entirely.
+            enable_cpu_offload=False,
         )
         for (out_w, out_h) in model.IMAGE_SHAPES:
             ratio = out_w / out_h
@@ -150,7 +156,7 @@ def main(cfg):
     if check_valid:
         validity_model_name = cfg.s6_upsample.validity_model
         if validity_model_name == "gemini":
-            validity_model = Gemini(
+            validity_model = create_text_vlm(
                 project=cfg.gcloud_project,
                 location="global",
                 model="gemini-3-pro-preview",

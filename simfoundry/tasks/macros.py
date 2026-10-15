@@ -42,6 +42,17 @@ GAINS = {
          0.0000]),
         "joint_upper_limits": th.tensor([2.6973,  1.5628,  2.6973, -0.2698,  2.6973,  3.5525,  2.6973, 0.7854, 0.7854]),
     },
+    # xArm6 + xArm Gripper. Driven joints: joint1..6, then the two outer knuckles (drive_joint,
+    # right_outer_knuckle_joint; the other four gripper joints are mimics). Effort / velocity
+    # caps are the URDF's (xarm_description); position limits stay the URDF's too.
+    "XArm6": {
+        # Force drives (scripts/assets/fix_xarm6_usd.py). Knuckle kp 30 holds a 4 cm cube with
+        # ~9 N m; 100 over-squeezes and shoves the arm.
+        "kp": th.tensor([400.0, 400.0, 400.0, 400.0, 400.0, 400.0, 30.0, 30.0]),
+        "kv": th.tensor([80.0, 80.0, 80.0, 80.0, 80.0, 80.0, 10.0, 10.0]),
+        "max_velocity": th.tensor([3.14, 3.14, 3.14, 3.14, 3.14, 3.14, 2.0, 2.0]),
+        "max_effort": th.tensor([50.0, 50.0, 32.0, 32.0, 32.0, 20.0, 50.0, 50.0]),
+    },
     "Yam": {
         "kp": th.tensor([400.0, 400.0, 400.0, 400.0, 400.0, 400.0, 400.0, 100.0, 100.0]),
         "kv": th.tensor([25.0, 25.0, 25.0, 25.0, 25.0, 25.0, 10.0, 10.0]),

@@ -8,6 +8,7 @@ Requires installing:
 
 - simfoundry, see the main README
 """
+import gc
 from copy import deepcopy
 from pathlib import Path
 from typing import Tuple, Optional
@@ -22,6 +23,8 @@ from supervision import draw_rectangle
 import shutil
 
 from simfoundry.models.vlm import Gemini, Imagen3, FLUX1
+from simfoundry.models.text_vlm import create_text_vlm
+from simfoundry.pipeline.reviewed_instances import load_reviewed_instances
 from simfoundry.models.sam_v3_gmask import SAM3
 from simfoundry.models.clip import CLIPEncoder
 from simfoundry.models.sbert import SBERTEncoder
@@ -859,11 +862,11 @@ def main(cfg):
     )
 
     # Object detection model: configurable via cfg.s5_scene.detection_model.
-    # Needs strong vision + structured JSON output. Uses Vertex AI Gemini and must be
-    # one of Gemini's supported model ids (DETECTION_MODELS).
+    # Gemini model ids remain the default configuration; the text provider factory
+    # can select local Qwen independently of the image-editing model below.
     detection_model_name = cfg.s5_scene.detection_model
     assert_valid_key(key=detection_model_name, valid_keys=DETECTION_MODELS, name="detection model")
-    vlm_pro = Gemini(
+    vlm_pro = create_text_vlm(
         project=cfg.gcloud_project,
         location="global",
         model=detection_model_name,
@@ -889,6 +892,10 @@ def main(cfg):
             model="FLUX.1-Kontext-dev",
             dtype=torch.bfloat16,
             device="cuda",
+            # See 6_upsample_object_images.py: CPU offload trades GPU VRAM for host
+            # RAM, which is the scarce/contended resource on this shared box. Keep
+            # the model fully resident on GPU instead, since GPU VRAM is plentiful.
+            enable_cpu_offload=False,
         )
     else:
         raise NotImplementedError
@@ -1051,6 +1058,15 @@ def main(cfg):
     # Iterate
     current_iteration = 0 if cfg.s5_scene.start_iter is None else cfg.s5_scene.start_iter
     end_iteration = cfg.s5_scene.end_iter
+    reviewed_instances = None
+    if cfg.s5_scene.get("reviewed_instances"):
+        reviewed_instances = load_reviewed_instances(
+            cfg.s5_scene.reviewed_instances, source_resized_image_fpath,
+        )
+        if end_iteration is None:
+            end_iteration = len(reviewed_instances)
+        elif end_iteration > len(reviewed_instances):
+            raise ValueError("end_iter exceeds the reviewed instance count")
     detection_iteration = 0
     resumed_obj_metadata = None
     feedback_resume_applied = False
@@ -1061,6 +1077,10 @@ def main(cfg):
     point_prompts = {}
     vlm_obj_prompt_points = {}
     vlm_obj_prompt_bboxes = {}
+    if reviewed_instances is not None:
+        category_overrides = {i: item["name"] for i, item in enumerate(reviewed_instances)}
+        if use_feedback:
+            raise ValueError("Use either reviewed_instances or rerun feedback, not both")
     if use_feedback:
         logger.info("="*60)
         logger.info("Processing feedback from 5b_visualize_decomposition.py...")
@@ -1166,6 +1186,7 @@ def main(cfg):
             logger.info(f"Resumed category state from iteration {current_iteration - 1}: {obj_cat_list}")
             if (
                 force_categories is None
+                and reviewed_instances is None
                 and current_iteration not in category_overrides
                 and len(obj_cat_list) == 0
             ):
@@ -1200,14 +1221,36 @@ def main(cfg):
             # TODO: add step to prune hallucinated objects
             if obj_cat_list is None or (current_iteration % update_categories_period == 0 and detection_iteration <= cfg.s5_scene.min_detection_iterations):
                 # 1. Detect object categories and 2D boxes in the current image using the VLM
+                # The removal_model (e.g. FLUX1, resident on GPU for the whole stage) leaves
+                # cached-but-unused allocations behind after each inpainting call. The VLM
+                # detection call below spawns a *separate* subprocess (local_qwen.py) that needs
+                # its own slice of free device memory to load its model; without releasing the
+                # cache here first, that subprocess can fail with a CUDA OOM even though the
+                # parent process isn't using all of it (observed reproducibly on this machine).
+                torch.cuda.empty_cache()
+                gc.collect()
+                # empty_cache()/gc.collect() above only reclaims *cached-but-unused* blocks;
+                # with SAM3 + a depth backend + FLUX all genuinely resident at once (nf4
+                # quantized or not), the live total can still leave only tens of MB free,
+                # and this subprocess's own vision-tower forward pass has OOM'd right at the
+                # finish line (after fully loading weights) in exactly that situation. Vision
+                # activation memory scales with image side length, so shrink it for this
+                # single-image category-detection call specifically; other Qwen call sites
+                # (e.g. stage 9's merge-parts step, which needs more detail across ~12 images)
+                # keep the default SIMFOUNDRY_QWEN_MAX_SIDE. Only LocalQwen understands this
+                # kwarg, so gate it the same way bbox_format is gated just below.
+                detect_kwargs = {"max_side": 768} if hasattr(vlm_pro, "max_side") else {}
                 logger.info("Detecting objects in image...")
                 result = vlm_pro(
-                    prompt=prompt_object_setlist_specific_floorplane_v3(floor_category),
+                    prompt=prompt_object_setlist_specific_floorplane_v3(
+                        floor_category, bbox_format=getattr(vlm_pro, "bbox_format", "yxyx"),
+                    ),
                     image_paths=current_rgb_fpath,
                     temperature=0,
                     top_p=0,
                     seed=0,
                     print_results=True,
+                    **detect_kwargs,
                 )
                 if result is None:
                     logger.error(
@@ -1438,7 +1481,16 @@ def main(cfg):
             user_point_xy = (x, y)
             logger.info(f"\n Using user hybrid text+point prompt for iteration {current_iteration}: {user_point_xy}")
 
-        if user_point_xy is not None:
+        if reviewed_instances is not None:
+            # Masks were generated with SAM on this exact source frame, then reviewed.
+            # A fixed, top-to-bottom sequence prevents failed edits from redetecting
+            # the same cable indefinitely and preserves assembly-level grouping.
+            instance = reviewed_instances[current_iteration]
+            all_masks = instance["mask"][None, None]
+            all_boxes_xyxy = np.asarray([instance["box"]], dtype=np.float32)
+            all_logits = np.ones(1, dtype=np.float32)
+            phrases = [instance["name"]]
+        elif user_point_xy is not None:
             # Keep existing feedback behavior: one user point guides this iteration.
             for obj_cat in obj_cat_list:
                 masks, boxes_xyxy, logits = sam3.predict_segmentation(pil_img=pil_img, text_prompt=obj_cat)
@@ -2016,6 +2068,12 @@ def main(cfg):
                 "valid_pixel_proportion": valid_pixel_proportion,
                 "valid_pixel_proportion_threshold": min_valid_pixel_prop,
                 "skipped_objects": skipped_objects,
+                "reviewed_instance": (
+                    {"manifest": str(cfg.s5_scene.reviewed_instances),
+                     "index": current_iteration,
+                     "provenance": reviewed_instances[current_iteration]["provenance"]}
+                    if reviewed_instances is not None else None
+                ),
                 # Which iteration's post-removal image/depth this object was detected
                 # against (null = the original source frame). Iteration numbers can have
                 # gaps, so consumers (stage 8/8b) must use this rather than idx - 1.

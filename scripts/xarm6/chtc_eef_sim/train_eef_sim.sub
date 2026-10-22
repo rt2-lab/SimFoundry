@@ -1,0 +1,66 @@
+# ==============================================================================
+# HTCondor submit file: pi0.5 finetune with task-space (TCP) actions, 447 aligned sim episodes only (182,911 frames).
+# CHTC GPU Lab. Normally submitted by submit.sh in this directory; by hand,
+# from ~/simfoundry_chtc_eef_sim on the access point:
+#   condor_submit train_eef_sim.sub -append "exp_name=xarm6_eef_sim_16k"
+#
+# W&B: WANDB_API_KEY / WANDB_ENTITY come from the submit shell (getenv); never put the key here.
+# ==============================================================================
+
+universe                = container
+container_image         = docker://$(dockerhub_user)/simfoundry_lerobot_train:0.6.1
+dockerhub_user          = tdu35
+
+staging                 = /staging/t/tdu35/simfoundry
+dataset_name            = xarm6_sim_eef
+base_name               = pi05_base
+exp_name                = xarm6_eef_sim_16k
+
+batch_size              = 32
+steps                   = 16000
+save_freq               = 4000
+real_repeat             = 1
+extra_args              =
+wandb_project           = pi05_xarm6_eef_sim
+
+executable              = run_train_eef.sh
+arguments               = $(exp_name) $(dataset_name) $(base_name)
+
+should_transfer_files   = YES
+when_to_transfer_output = ON_EXIT_OR_EVICT
+transfer_input_files    = finetune_eef.sh, train_cotrain.py, \
+                          file://$(staging)/$(dataset_name)_dataset.tar, \
+                          file://$(staging)/$(base_name)_base.tar
+transfer_output_files   = checkpoint_bundle.tar
+transfer_output_remaps  = "checkpoint_bundle.tar = file://$(staging)/checkpoints/$(exp_name).tar"
+
+getenv                  = WANDB_API_KEY, WANDB_ENTITY
+environment             = "BATCH_SIZE=$(batch_size) STEPS=$(steps) SAVE_FREQ=$(save_freq) REAL_REPEAT=$(real_repeat) WANDB_PROJECT=$(wandb_project) TRAIN_EXTRA_ARGS='$(extra_args)'"
+
+log                     = logs/train_$(Cluster).log
+output                  = logs/train_$(Cluster).out
+error                   = logs/train_$(Cluster).err
+stream_output           = True
+stream_error            = True
+
+# ~1.64 s/step on an H100 (round 5): 16k steps ~ 7.3 h, inside "medium" (24 h).
+min_gpu_mem             = 80000M
+request_gpus            = 1
+request_cpus            = 8
+request_memory          = 64GB
+# base ~7 GB + dataset ~2 GB + 4 saved steps x ~11 GB + bundle
+request_disk            = 120GB
+gpus_minimum_memory     = $(min_gpu_mem)
+gpus_minimum_capability = 8.0
+# The image's torch is built for CUDA 12.6 up to sm_90: newer cards (e.g. sgomezgpu6000, 2026-10-21)
+# fail with cudaErrorNoKernelImageForDevice right after the inputs are transferred.
+gpus_maximum_capability = 9.0
+
++WantGPULab             = true
++GPUJobLength           = "medium"
++is_resumable           = false
+
+bad_nodes               = gpu2008.chtc.wisc.edu
+Requirements            = (Target.HasCHTCStaging == true) && (Target.CUDADriverVersion >= 12.6) && (Target.Machine != "$(bad_nodes)")
+
+queue 1

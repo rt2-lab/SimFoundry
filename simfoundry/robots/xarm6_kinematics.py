@@ -90,3 +90,38 @@ class XArm6Kinematics:
             q = np.clip(q + step, self.lower, self.upper)
         err = self._error(q, pos, rot)
         return q, bool(np.linalg.norm(err[:3]) < 5 * tol_pos and np.linalg.norm(err[3:]) < 5 * tol_rot)
+
+    def ik_nearest(self, pos, quat, q_seed, max_iters=50, pos_weight=50.0, ori_weight=10.0, damping=1e-3):
+        """Like ik(), but returns the best iterate instead of the last one.
+
+        A target past a joint limit or the workspace edge cannot be met; clamping every step then
+        makes plain damped least squares oscillate and its last iterate can be worse than the seed.
+        xarm_stack's simple_ik solves a weighted least squares (position 50, orientation 10, plus a
+        joint-limit cost) and so always returns the closest reachable pose; the best iterate by the
+        same weighted error is the equivalent here. Returns (q, converged, weighted_error).
+        """
+        rot = Rotation.from_quat(quat)
+        q = np.clip(np.asarray(q_seed, dtype=float).copy(), self.lower, self.upper)
+        eps = 1e-6
+        w = np.r_[np.full(3, pos_weight), np.full(3, ori_weight)]
+        best_q, best_cost, converged = q.copy(), np.inf, False
+        for _ in range(max_iters):
+            err = self._error(q, pos, rot)
+            cost = float(np.linalg.norm(w * err))
+            if cost < best_cost:
+                best_q, best_cost = q.copy(), cost
+            if np.linalg.norm(err[:3]) < 1e-4 and np.linalg.norm(err[3:]) < 1e-3:
+                converged = True
+                break
+            jac = np.empty((6, 6))
+            for k in range(6):
+                dq = np.zeros(6)
+                dq[k] = eps
+                jac[:, k] = (err - self._error(q + dq, pos, rot)) / eps
+            q = np.clip(q + jac.T @ np.linalg.solve(jac @ jac.T + damping * np.eye(6), err), self.lower, self.upper)
+        else:
+            err = self._error(q, pos, rot)
+            cost = float(np.linalg.norm(w * err))
+            if cost < best_cost:
+                best_q, best_cost = q.copy(), cost
+        return best_q, converged, best_cost

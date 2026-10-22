@@ -1,0 +1,32 @@
+# xArm6 camera rig matching the real robot (2026-10 autoalloc dataset): two RealSense D435i colour
+# streams at 640x480, factory intrinsics, extrinsics estimated from the recorded episodes
+# (scripts/xarm6/real/estimate_*_extrinsics.py -> scripts/cfg/real/xarm6_*_extrinsics.json).
+#   front_cam = real "mount" camera, SN 243222070233, fx 605.75  (hfov 55.7 deg), pose in the robot base frame
+#   wrist_cam = real "gripper" camera, SN 243122074665, fx 600.89 (hfov 56.1 deg), pose in link6 (flange)
+# Poses are in USD camera axes (looking down -z, y up) = OpenCV axes with y and z flipped.
+# focal_length = fx * horizontal_aperture / width. The 4-7 px principal-point offsets are ignored.
+external_sensors:
+  - sensor_type: VisionSensor
+    name: front_cam
+    relative_prim_path: /controllable__xarm6__robot0/link_base/front_cam
+    modalities: [ rgb ]
+    sensor_kwargs:
+      image_height: 480
+      image_width: 640
+      focal_length: 3.4073
+      horizontal_aperture: 3.6
+    position: [-0.03527, -0.25225, 0.6847]
+    orientation: [0.272361, -0.171971, -0.528575, 0.785401]
+    pose_frame: parent
+  - sensor_type: VisionSensor
+    name: wrist_cam
+    relative_prim_path: /controllable__xarm6__robot0/link6/wrist_cam
+    modalities: [ rgb ]
+    sensor_kwargs:
+      image_height: 480
+      image_width: 640
+      focal_length: 3.38
+      horizontal_aperture: 3.6
+    position: [0.07289, -0.00519, 0.08547]
+    orientation: [0.688036, 0.679656, 0.165536, 0.193060]
+    pose_frame: parent

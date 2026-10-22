@@ -1,0 +1,36 @@
+# Round-3 rig (close front camera): same as sim_xarm6_front_wrist.yaml except the front camera,
+# which sits closer to the workspace with a 42 deg FOV (a D435 color stream centre-cropped to a
+# square), so a 4 cm cube is ~13-19 px in the policy's 224 px input instead of ~8-13 px.
+# xArm6 camera rig: one front camera facing the robot across the workspace plus a wrist camera,
+# the two views xArm6 pi0.5 finetunes (e.g. ys903/pi05_xarm6_pick_place_50ep) are trained on.
+# Square frames like the ys903 dataset (640x640). Both are RealSense D435-class color cameras (~69 deg horizontal FOV: aperture/focal = 2*tan(34.5)).
+external_sensors:
+  - sensor_type: VisionSensor
+    name: front_cam
+    relative_prim_path: /controllable__xarm6__robot0/link_base/front_cam
+    modalities: [ rgb ]
+    sensor_kwargs:
+      image_height: 320
+      image_width: 320
+      focal_length: 1.93
+      horizontal_aperture: 1.4817
+    # Robot base frame. Beside the workspace on the robot's left, looking across it: eye
+    # (0.52, 0.85, 0.50) at (0.50, 0, 0.04), ~28 deg down. Chosen by projecting the box, the cubes'
+    # randomization range and the gripper's approach volume into the image and maximizing cube
+    # size with all of them in view.
+    position: [0.52, 0.85, 0.50]
+    orientation: [0.00602, 0.5119, 0.85897, 0.0101]
+    pose_frame: parent
+  - sensor_type: VisionSensor
+    name: wrist_cam
+    relative_prim_path: /controllable__xarm6__robot0/link6/wrist_cam
+    modalities: [ rgb ]
+    sensor_kwargs:
+      image_height: 320
+      image_width: 320
+      focal_length: 1.93
+      horizontal_aperture: 2.65
+    # UFactory D435i wrist mount: color optical frame in link6, USD camera convention.
+    position: [0.06746, -0.0325, 0.0237]
+    orientation: [0.70711, 0.70711, 0.0, 0.0]
+    pose_frame: parent

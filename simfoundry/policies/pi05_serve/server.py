@@ -94,7 +94,7 @@ def _state_width(policy, preprocessor):
     return policy.config.input_features["observation.state"].shape[0]
 
 
-def _load_policy(checkpoint_path: str, device: str):
+def _load_policy(checkpoint_path: str, device: str, num_inference_steps: int | None = None):
     """Load the PI05 policy + processors exactly once. See module docstring."""
     from lerobot.configs.policies import PreTrainedConfig
     from lerobot.policies.factory import make_pre_post_processors
@@ -102,11 +102,30 @@ def _load_policy(checkpoint_path: str, device: str):
 
     log.info(f"Loading pi05 config from {checkpoint_path} ...")
     cfg = PreTrainedConfig.from_pretrained(checkpoint_path)
+    if num_inference_steps:  # flow-matching integration steps (trained with 10): fewer = faster, coarser
+        log.info(f"num_inference_steps {cfg.num_inference_steps} -> {num_inference_steps}")
+        cfg.num_inference_steps = num_inference_steps
     cfg.device = device
 
     log.info(f"Loading pi05 policy weights (this reads ~14GB from disk once) ...")
     t0 = time.time()
-    policy = PI05Policy.from_pretrained(checkpoint_path, config=cfg)
+    if str(device).startswith("cuda"):
+        # Build the model and read the safetensors straight onto the GPU: the default path builds a
+        # CPU model and loads a second CPU copy of the weights (~18 GB peak for a 9 GB checkpoint),
+        # which the OOM killer stops on this 30 GB shared machine.
+        import safetensors.torch as st
+        import torch
+
+        orig_load_file = st.load_file
+        st.load_file = lambda f, device="cpu": orig_load_file(f, device=str(cfg.device))
+        try:
+            with torch.device(device):
+                policy = PI05Policy.from_pretrained(checkpoint_path, config=cfg)
+        finally:
+            st.load_file = orig_load_file
+        torch.cuda.empty_cache()  # hand back the loaded state dict's blocks (the sim shares this GPU)
+    else:
+        policy = PI05Policy.from_pretrained(checkpoint_path, config=cfg)
     policy.eval()
     log.info(f"Policy loaded in {time.time() - t0:.1f}s on device={device}")
 
@@ -220,6 +239,8 @@ def main():
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8420)
     parser.add_argument("--device", default="cpu", choices=["cpu", "cuda"])
+    parser.add_argument("--num-inference-steps", type=int, default=None,
+                        help="override the checkpoint's flow-matching steps (10); e.g. 5 to cut latency for fast execution")
     parser.add_argument("--hf-token", default=None, help="HF token for the gated google/paligemma-3b-pt-224 tokenizer download")
     args = parser.parse_args()
 
@@ -232,7 +253,7 @@ def main():
     # Load synchronously before serving: the client waits on /health polling,
     # so there is no benefit to backgrounding this, and it avoids racing
     # /infer against an unfinished load.
-    _load_policy(args.checkpoint, args.device)
+    _load_policy(args.checkpoint, args.device, args.num_inference_steps)
 
     # threaded=False: only one inference should ever run at a time against a
     # single-episode rollout; avoids two /infer calls racing on the same

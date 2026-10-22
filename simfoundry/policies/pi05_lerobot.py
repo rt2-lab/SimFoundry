@@ -286,11 +286,22 @@ class PI05XArm6Client(PI05LerobotClient):
         "droid": {"front": "base_0_rgb", "wrist": "left_wrist_0_rgb"},
     }
 
-    def __init__(self, *args, image_size: int = 224, camera_keys: str = "ufactory", **kwargs):
-        kwargs.setdefault("action_dim", 7)
+    def __init__(self, *args, image_size: int = 224, camera_keys: str = "ufactory", droid_layout: bool = False,
+                 **kwargs):
+        # droid_layout: the checkpoint was trained on 8-dim [J1..J6, 0, gripper] state/action
+        # (convert_demos_to_lerobot.py --droid-layout); obs["state"] and the returned actions stay
+        # 7-dim [J1..J6, gripper] either way.
+        kwargs.setdefault("action_dim", 8 if droid_layout else 7)
         super().__init__(*args, **kwargs)
         self.image_size = image_size
         self.camera_keys = self.CAMERA_KEYS[camera_keys]
+        self.droid_layout = droid_layout
+
+    def _state(self, state):
+        state = np.asarray(state, dtype=np.float32).flatten()
+        if self.droid_layout:
+            state = np.concatenate([state[:6], [0.0], state[6:7]]).astype(np.float32)
+        return state
 
     def visualize(self, obs: dict):
         return np.concatenate([resize_with_pad(obs[k], self.image_size, self.image_size)
@@ -300,11 +311,13 @@ class PI05XArm6Client(PI05LerobotClient):
         images = {k: resize_with_pad(obs[k], self.image_size, self.image_size) for k in ("front", "wrist")}
         payload = {
             "images": {self.camera_keys[k]: self._encode_image(v) for k, v in images.items()},
-            "state": np.asarray(obs["state"], dtype=np.float32).flatten().tolist(),
+            "state": self._state(obs["state"]).tolist(),
             "task": instruction,
             "action_dim": self.action_dim,
         }
         resp = requests.post(f"{self.base_url}/infer", json=payload, timeout=60.0)
         resp.raise_for_status()
-        action_chunk = np.asarray(resp.json()["action"], dtype=np.float32)  # (chunk_size, 7)
+        action_chunk = np.asarray(resp.json()["action"], dtype=np.float32)
+        if self.droid_layout:  # (chunk, 8) -> (chunk, 7): drop the J7 pad
+            action_chunk = np.concatenate([action_chunk[:, :6], action_chunk[:, 7:8]], axis=1)
         return {"action": action_chunk, "viz": np.concatenate(list(images.values()), axis=1)}

@@ -303,3 +303,26 @@ bash scripts/xarm6/finetune_pi05.sh Data/cube2_scene/lerobot/xarm6_cube_in_box_s
 - 评测 DROID 系模型：`eval_pi05_xarm6.py --camera-keys droid`（front/wrist → base_0_rgb/left_wrist_0_rgb）；server 输出已转回绝对关节角。
 - 磁盘：每个 checkpoint ~11 GB（模型 8.8 + 优化器 2.1），保存时新旧两个会同时存在。
 - 每条 demo：随机化两个方块（±8 cm、随机 yaw）和箱子（±4 cm）、初始关节 ±0.05 rad、速度 ×0.8–1.2、路径点抖动；先确认盖子打开；IK 逐步跟踪（`simfoundry/robots/xarm6_kinematics.py`，与仿真 FK 完全一致）；只保留方块最终在箱内的 episode。prompt 在三种说法里随机，颜色对应目标方块。
+
+### 7.6 域随机化（让仿真桌面不再是白色）
+- 真实桌面是浅橡木色（RGB ≈ 215/180/130，横向木纹）。仿真地面原本是纯白，视觉差距太大，所以 `generate_scripted_demos.py` 默认每个 episode 随机化（`--no-domain-rand` 关闭）：
+  - **桌面**（`simfoundry/robots/xarm6_randomize.py`）：80% 程序化木纹（`tabletop_textures.py`，7 种木色：浅橡木 / 山毛榉 / 松木 / 白蜡 / 胡桃 / 樱桃 / 桦木，随机纹理、纹理尺度 0.25–0.9 m、旋转、色调、粗糙度），20% 纯色垫子（白/灰/黑/绿/蓝）；
+  - **光照**：穹顶光强度 ×0.25–0.9（原始 2500 会把浅色表面洗白）、色温 3500–7500 K；
+  - **相机**：前置相机位置 ±3 cm、角度 ±3°、焦距 ±6%；手腕相机 ±4 mm、±2°；
+  - 所有参数记录在 `episodes.jsonl` 的 `domain_rand` 字段。
+- **坑**：原来的地面 mesh 没有 UV，且 Isaac 把材质绑在父节点上，覆盖子节点的绑定，所以直接给地面换材质没有效果。现在在地面上方 0.3 mm 放一个带 UV 的纯视觉四边形（无碰撞）并隐藏原地面外观。
+- 训练端再叠一层图像增强：`finetune_pi05.sh` 默认 `IMAGE_AUG=1`（亮度/对比度/饱和度/色调/锐度/小幅仿射，每帧随机 2 种）。
+- 仍然没有随机化的：天空背景（前置相机顶部能看到蓝天）、方块和箱子的颜色/材质、干扰物。如果真机场景背景差异大，下一步加。
+
+
+### 7.7 第三轮的三项改进（第一轮评测 0/10 之后）
+第一轮（100 条白桌面 demo）在仿真里真实成功率 0/10。离线喂训练数据时关节预测准确，但闭环失败，原因有三：
+1. **方块太小**：旧前置相机下，4 cm 方块在 224 px 输入里只有约 8 px。新相机配置 `scripts/cfg/external_sensors/sim_xarm6_front_close.yaml`：更近、42° 视场（D435 彩色流裁成正方形），方块约 13–19 px。位置是把箱子、方块随机范围、夹爪接近空间投影到画面里、在都可见的前提下让方块最大化搜出来的。**评测时 `--sensors` 必须和训练数据一致。**
+2. **夹爪糊**：模型的夹爪输出在 0.4–0.6 徘徊，按 0.5 二值化会在第一步就闭合，模型随即"以为已经抓着"直接去箱子。
+   - 推理端：`simfoundry/policies/gripper_filter.py` 的 `GripperHysteresis`（默认连续 3 步 ≥0.8 才闭合、连续 3 步 ≤0.3 才张开），评测默认 `--grip-mode hysteresis`。
+   - 根因：DROID 基座是 7 关节 + 夹爪（夹爪在索引 7），xArm6 的夹爪原本落在索引 6（DROID 第 7 关节的位置），预训练的夹爪知识用不上。`convert_demos_to_lerobot.py --droid-layout` 把 state/action 排成 8 维 `[J1..J6, 0, gripper]`；评测加 `--droid-layout`。
+3. **数据量**：450 条，近相机 + 域随机化。
+- 评测判据：任务自带的 `InsideAABB` 用整个箱子（含竖起的盖子）的包围盒，推歪箱子会误判成功；评测脚本现在用箱体底座 AABB 的严格判据。`touched_cube`/`picked_cube` 对这个夹爪永远不触发，忽略。
+- 第三轮训练：`batch_size=32 steps=16000`（约 2.8 个 epoch），CHTC medium 队列、≥80 GB 显卡。
+- 第三轮评测命令：`eval_pi05_xarm6.py --sensors sim_xarm6_front_close --camera-keys droid --droid-layout --execute-horizon 15`。
+- 本机内存只有 30 GB：训练加载 4B 模型、推理服务、仿真三者不要同时在本机跑。

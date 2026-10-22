@@ -5,8 +5,8 @@
 # From ~/simfoundry_chtc on the CHTC submit node (stage_to_chtc.sh copies this directory and
 # finetune_pi05.sh there; see README.md):
 #   condor_submit train.sub
-#   condor_submit train.sub exp_name=bs32 batch_size=32 steps=5000 save_freq=2500
-#   condor_submit train.sub exp_name=full extra_args="--policy.train_expert_only=false" min_gpu_mem=80000
+#   condor_submit train.sub -append "exp_name=bs32" -append "batch_size=32" -append "steps=5000" -append "save_freq=2500"
+#   condor_submit train.sub -append "exp_name=full" -append "extra_args=--policy.train_expert_only=false" -append "min_gpu_mem=80000M"
 #
 # W&B: export WANDB_API_KEY (and WANDB_ENTITY) in the submit shell; getenv passes them through.
 # Never put the key in this file.
@@ -49,8 +49,8 @@ stream_output           = True
 stream_error            = True
 
 # Frozen vision encoder + action expert only needs ~16 GB, so any GPU-Lab card >= 40 GB works
-# (L40 / L40S 45 GB, A100 40/80 GB, H100 80 GB, H200 141 GB). Full finetune: min_gpu_mem=80000.
-min_gpu_mem             = 40000
+# (L40 / L40S 45 GB, A100 40/80 GB, H100 80 GB, H200 141 GB). Full finetune: min_gpu_mem=80000M.
+min_gpu_mem             = 40000M
 request_gpus            = 1
 request_cpus            = 8
 request_memory          = 64GB
@@ -60,11 +60,16 @@ gpus_minimum_memory     = $(min_gpu_mem)
 gpus_minimum_capability = 8.0
 
 +WantGPULab             = true
-# 20k steps at batch 8 took ~6 h on an RTX 5090; "short" (<= 12 h) gets the most GPUs.
-+GPUJobLength           = "short"
+# "medium" = 24 h. Never use "short" (12 h) for a real run: the pool hands out whatever card is free,
+# and the same 30k-step job needed ~3.7 h on an H200 but 1.7 s/step (>14 h) on an L40; the 12 h limit
+# evicted it at step 25.5K and the checkpoints on the node were lost with it. Budget steps by the
+# slowest card you accept (1.7 s/step at batch 8, so 24 h ~ 50k steps) or raise min_gpu_mem.
++GPUJobLength           = "medium"
 +is_resumable           = false
 
 # torch cu126 wheels need a CUDA 12.6+ driver; /staging inputs need staging access.
-Requirements            = (Target.HasCHTCStaging == true) && (Target.CUDADriverVersion >= 12.6)
+# bad_nodes: machines where the CUDA self-test in run_train_chtc.sh failed (gpu2008: "device busy").
+bad_nodes               = gpu2008.chtc.wisc.edu
+Requirements            = (Target.HasCHTCStaging == true) && (Target.CUDADriverVersion >= 12.6) && (Target.Machine != "$(bad_nodes)")
 
 queue 1

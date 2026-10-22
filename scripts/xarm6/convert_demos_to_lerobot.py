@@ -23,6 +23,15 @@ import av
 import numpy as np
 
 NAMES = ["J1.pos", "J2.pos", "J3.pos", "J4.pos", "J5.pos", "J6.pos", "gripper.pos"]
+# DROID layout: 7 arm joints + gripper. The xArm6 fills J1-J6, J7 is a constant 0, and the gripper
+# lands in index 7, the slot a DROID-pretrained pi0.5 (e.g. pi05_droid_jointpos) already uses for
+# its gripper in both the state tokens and the action head.
+DROID_NAMES = ["J1.pos", "J2.pos", "J3.pos", "J4.pos", "J5.pos", "J6.pos", "J7.pad", "gripper.pos"]
+
+
+def to_droid_layout(x):
+    """(T, 7) [J1..J6, gripper] -> (T, 8) [J1..J6, 0, gripper]."""
+    return np.concatenate([x[:, :6], np.zeros((len(x), 1), x.dtype), x[:, 6:7]], axis=1)
 
 
 def read_video(path):
@@ -32,23 +41,31 @@ def read_video(path):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--demo-dir", required=True)
+    ap.add_argument("--demo-dir", required=True, nargs="+",
+                    help="one or more generate_scripted_demos.py output dirs (e.g. parallel generators)")
+    ap.add_argument("--max-episodes", type=int, default=None, help="stop after this many episodes in total")
     ap.add_argument("--root", required=True, help="output dataset directory (must not exist)")
     ap.add_argument("--repo-id", required=True)
     ap.add_argument("--fps", type=int, default=30)
     ap.add_argument("--relative-action-chunk", type=int, default=None)
+    ap.add_argument("--droid-layout", action="store_true",
+                    help="8-dim state/action [J1..J6, 0, gripper] matching a DROID-pretrained base")
     args = ap.parse_args()
 
     from lerobot.datasets.lerobot_dataset import LeRobotDataset
 
-    with open(os.path.join(args.demo_dir, "episodes.jsonl")) as f:
-        episodes = [json.loads(line) for line in f if line.strip()]
-    first = read_video(os.path.join(args.demo_dir, f"{episodes[0]['episode']}_front.mp4"))
+    episodes = []
+    for demo_dir in args.demo_dir:
+        with open(os.path.join(demo_dir, "episodes.jsonl")) as f:
+            episodes += [dict(json.loads(line), dir=demo_dir) for line in f if line.strip()]
+    episodes = episodes[:args.max_episodes]
+    first = read_video(os.path.join(episodes[0]["dir"], f"{episodes[0]['episode']}_front.mp4"))
     h, w = first.shape[1:3]
     image_feature = {"dtype": "video", "shape": (h, w, 3), "names": ["height", "width", "channels"]}
+    names = DROID_NAMES if args.droid_layout else NAMES
     features = {
-        "action": {"dtype": "float32", "shape": (7,), "names": NAMES},
-        "observation.state": {"dtype": "float32", "shape": (7,), "names": NAMES},
+        "action": {"dtype": "float32", "shape": (len(names),), "names": names},
+        "observation.state": {"dtype": "float32", "shape": (len(names),), "names": names},
         "observation.images.front": image_feature,
         "observation.images.wrist": dict(image_feature),
     }
@@ -56,9 +73,12 @@ def main():
                                robot_type="UFACTORY Robot", use_videos=True)
     for ep in episodes:
         name = ep["episode"]
-        lowdim = np.load(os.path.join(args.demo_dir, f"{name}.npz"))
-        front = read_video(os.path.join(args.demo_dir, f"{name}_front.mp4"))
-        wrist = read_video(os.path.join(args.demo_dir, f"{name}_wrist.mp4"))
+        demo_dir = ep["dir"]
+        lowdim = dict(np.load(os.path.join(demo_dir, f"{name}.npz")))
+        if args.droid_layout:
+            lowdim = {k: to_droid_layout(v) for k, v in lowdim.items()}
+        front = read_video(os.path.join(demo_dir, f"{name}_front.mp4"))
+        wrist = read_video(os.path.join(demo_dir, f"{name}_wrist.mp4"))
         n = len(lowdim["action"])
         assert len(front) == len(wrist) == n == len(lowdim["state"]), (name, len(front), len(wrist), n)
         for t in range(n):

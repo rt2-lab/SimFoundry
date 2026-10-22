@@ -28,6 +28,9 @@ for tarball in "${DATASET_NAME}_dataset.tar" "${BASE_NAME}_base.tar"; do
     rm -f "${tarball}"
 done
 
+# The container runs as the submitter's uid, which has no passwd entry; torch's getpass.getuser()
+# raises KeyError without these.
+export USER="${USER:-chtc}" LOGNAME="${LOGNAME:-chtc}"
 export HOME="${SCRATCH}" XDG_CACHE_HOME="${SCRATCH}/.cache"
 # Everything the trainer needs is local: no Hub downloads (the tokenizer is gated), only wandb.
 export HF_HOME="${SCRATCH}/hf_home"
@@ -54,6 +57,14 @@ on_exit_or_signal() {
     [ "${NORMAL_COMPLETION}" -eq 1 ] || package_checkpoints
 }
 trap on_exit_or_signal EXIT TERM INT
+
+# Fail fast on a bad GPU node (one A100 node reported "CUDA device busy or unavailable" at the
+# first allocation, after the 7 GB of inputs had already been transferred).
+if ! python -c "import torch; x = torch.zeros(1, device='cuda'); print('CUDA ok:', torch.cuda.get_device_name(0))"; then
+    echo "CUDA self-test failed on $(hostname)" >&2
+    nvidia-smi -q -d COMPUTE | grep -i "compute mode" >&2 || true
+    exit 3
+fi
 
 echo "Starting training"
 bash finetune_pi05.sh "${SCRATCH}/local/${DATASET_NAME}" "${OUT_DIR}" "${SCRATCH}/${BASE_NAME}"

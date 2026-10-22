@@ -31,7 +31,7 @@ bash scripts/xarm6/chtc/stage_to_chtc.sh tdu35 ap2002.chtc.wisc.edu          # o
 # 2. Access point
 ssh tdu35@ap2002.chtc.wisc.edu
 cd ~/simfoundry_chtc
-condor_submit train.sub dockerhub_user=tdu35
+condor_submit train.sub
 condor_q; condor_tail -f <job_id>
 
 # 3. Lab machine, when it finishes
@@ -43,12 +43,18 @@ dataset only needs `stage_to_chtc.sh ... dataset`.
 
 ## Variants (submit-time overrides)
 
+Override variables with `condor_submit train.sub -append "name=value"`. A bare `name=value` after the
+file name does **not** override: the assignments in `train.sub` win (this submitted a job with the
+wrong dataset once).
+
+
 | Run | Overrides |
 |---|---|
+| Second-round recipe: 200 randomized demos, 30k steps, image augmentation | `-append "dataset_name=xarm6_cube_in_box_rand" -append "steps=30000" -append "save_freq=10000" -append "exp_name=xarm6_rand_aug_30k"` |
 | Default: local recipe, batch 8 x 20k steps, frozen vision, action expert only (~16 GB) | none |
 | Bigger batch, same number of epochs | `batch_size=32 steps=5000 save_freq=2500` |
-| Full finetune (vision still frozen) on an 80 GB card | `extra_args="--policy.train_expert_only=false" min_gpu_mem=80000` |
-| Over 12 h | `+GPUJobLength="medium"` (24 h) or `"long"` (7 days, max 4 GPUs/user) |
+| Full finetune (vision still frozen) on an 80 GB card | `extra_args="--policy.train_expert_only=false" min_gpu_mem=80000M` |
+| Over 24 h | `-append '+GPUJobLength="long"'` (7 days, max 4 GPUs/user) |
 
 Use a new `exp_name` per submission; the bundle is written to
 `/staging/t/tdu35/simfoundry/checkpoints/<exp_name>.tar`, with every saved step's
@@ -62,6 +68,8 @@ Use a new `exp_name` per submission; the bundle is written to
 | A100-SXM4 | 40 / 80 GB | 8.0 | 8 / 32 |
 | H100 | 80 GB | 9.0 | 8 |
 | H200 | 141 GB | 9.0 | 16 |
+
+**Do not use `short` for real runs**: a 30k-step batch-8 job took ~3.7 h on an H200 but >14 h on an L40, and was evicted at 12 h with its checkpoints lost. `train.sub` defaults to medium.
 
 Job lengths: short 12 h (up to 2/3 of the lab), medium 24 h (1/3), long 7 days (4 GPUs per user).
 

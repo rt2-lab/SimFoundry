@@ -15,6 +15,10 @@
 # dataset's front / wrist views are renamed onto base_0_rgb / left_wrist_0_rgb; right_wrist_0_rgb
 # stays empty, and the 7-dim state is zero-padded to its max_state_dim of 8.
 #
+# Image augmentation (IMAGE_AUG=1, default): LeRobot's colour jitter (brightness / contrast /
+# saturation / hue), sharpness and small affine transforms, 2 random ones per frame, on top of the
+# sim domain randomization in the data itself. IMAGE_AUG=0 turns it off.
+#
 # Environment overrides: LEROBOT_TRAIN (trainer executable, default: the local LeRobot venv's),
 # BATCH_SIZE / STEPS / SAVE_FREQ, and TRAIN_EXTRA_ARGS (extra lerobot-train flags, e.g.
 # "--policy.train_expert_only=false" for a full finetune on an 80 GB GPU).
@@ -30,6 +34,9 @@ DATASET_ROOT=${1:?dataset root}
 OUTPUT_DIR=${2:?output dir}
 BASE=${3:-DAVIAN-Robotics/pi05_droid_jointpos}
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# Action dimension names from the dataset (7-dim UFACTORY or 8-dim DROID layout); the relative-
+# action mask is built from them, keeping "gripper" absolute.
+ACTION_NAMES="$(python3 -c 'import json, sys; print(json.dumps(json.load(open(sys.argv[1]))["features"]["action"]["names"]))' "${DATASET_ROOT}/meta/info.json")"
 
 # shellcheck disable=SC2086  # TRAIN_EXTRA_ARGS is a list of flags
 "${LEROBOT_TRAIN:-${REPO_DIR}/.cache/pi05-serve-venv/bin/lerobot-train}" \
@@ -42,9 +49,11 @@ REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
   --policy.gradient_checkpointing=true \
   --policy.freeze_vision_encoder=true \
   --policy.train_expert_only=true \
+  --dataset.image_transforms.enable="$([ "${IMAGE_AUG:-1}" = 1 ] && echo true || echo false)" \
+  --dataset.image_transforms.max_num_transforms=2 \
   --policy.use_relative_actions=true \
   --policy.relative_exclude_joints='["gripper"]' \
-  --policy.action_feature_names='["J1.pos", "J2.pos", "J3.pos", "J4.pos", "J5.pos", "J6.pos", "gripper.pos"]' \
+  --policy.action_feature_names="${ACTION_NAMES}" \
   --rename_map='{"observation.images.front": "observation.images.base_0_rgb", "observation.images.wrist": "observation.images.left_wrist_0_rgb"}' \
   --batch_size="${BATCH_SIZE:-8}" \
   --steps="${STEPS:-20000}" \

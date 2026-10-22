@@ -39,6 +39,7 @@ def make_xarm6_env(
     max_steps=900,
     grasping_mode="physical",
     robot_pose=None,
+    physics_freq=120,
 ):
     """Build the env and install absolute joint control on the arm and a 0..1 gripper command.
 
@@ -73,7 +74,7 @@ def make_xarm6_env(
 
     env = og.Environment(configs={
         "env": {"external_sensors": sensors, "action_frequency": action_freq,
-                "rendering_frequency": action_freq, "physics_frequency": 120},
+                "rendering_frequency": action_freq, "physics_frequency": physics_freq},
         "scene": {"type": "Scene", "scene_file": modified, "use_floor_plane": True,
                   "floor_plane_visible": True, "use_skybox": True, "include_robots": True},
         "task": task_cfg,

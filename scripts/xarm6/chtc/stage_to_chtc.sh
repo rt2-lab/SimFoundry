@@ -27,30 +27,37 @@ trap 'rm -rf "${TMP}"' EXIT
 
 DATASET_NAME="$(basename "${DATASET_DIR}")"
 BASE_NAME="$(basename "${BASE_DIR}")"
-upload=()
+# One ssh connection per host for all transfers (one password + Duo), and tars streamed straight
+# into staging: the base checkpoint alone is a 14 GB tar, more than the lab disk has free.
+SSH_OPTS=(-o ControlMaster=auto -o "ControlPath=${HOME}/.ssh/cm-%r@%h:%p" -o ControlPersist=30m)
 
+stream() {  # stream <remote tar name> <tar args...>
+    local name="$1"; shift
+    echo "streaming ${name} -> ${TRANSFER_HOST}:${STAGING}/"
+    tar -chf - "$@" | ssh "${SSH_OPTS[@]}" "${NETID}@${TRANSFER_HOST}" "cat > ${STAGING}/${name}.part && mv ${STAGING}/${name}.part ${STAGING}/${name}"
+}
+
+if [[ "${WHAT}" == all || "${WHAT}" == dataset || "${WHAT}" == base ]]; then
+    ssh "${SSH_OPTS[@]}" "${NETID}@${TRANSFER_HOST}" "mkdir -p ${STAGING}/checkpoints"
+fi
 if [[ "${WHAT}" == all || "${WHAT}" == dataset ]]; then
     test -f "${DATASET_DIR}/meta/stats.json" || { echo "missing dataset ${DATASET_DIR}"; exit 1; }
-    tar -cf "${TMP}/${DATASET_NAME}_dataset.tar" -C "$(dirname "${DATASET_DIR}")" \
+    du -shL "${DATASET_DIR}"
+    stream "${DATASET_NAME}_dataset.tar" -C "$(dirname "${DATASET_DIR}")" \
         --transform "s,^${DATASET_NAME},local/${DATASET_NAME}," "${DATASET_NAME}"
-    upload+=("${TMP}/${DATASET_NAME}_dataset.tar")
 fi
 if [[ "${WHAT}" == all || "${WHAT}" == base ]]; then
     test -f "${BASE_DIR}/model.safetensors" || { echo "missing checkpoint ${BASE_DIR}"; exit 1; }
     test -d "${TOKENIZER_CACHE}" || { echo "missing tokenizer cache ${TOKENIZER_CACHE}"; exit 1; }
     mkdir -p "${TMP}/hf_home/hub"
-    cp -a "${TOKENIZER_CACHE}" "${TMP}/hf_home/hub/"
-    tar -cf "${TMP}/${BASE_NAME}_base.tar" -C "$(dirname "${BASE_DIR}")" "${BASE_NAME}" -C "${TMP}" hf_home
-    upload+=("${TMP}/${BASE_NAME}_base.tar")
-fi
-if (( ${#upload[@]} )); then
-    du -sh "${upload[@]}"
-    ssh "${NETID}@${TRANSFER_HOST}" "mkdir -p ${STAGING}/checkpoints"
-    scp "${upload[@]}" "${NETID}@${TRANSFER_HOST}:${STAGING}/"
+    # -L: the cache links tokenizer.json to hub/blobs/<xx>/<hash>, outside this directory; a plain copy leaves it dangling.
+    cp -aL "${TOKENIZER_CACHE}" "${TMP}/hf_home/hub/"
+    du -shL "${BASE_DIR}"
+    stream "${BASE_NAME}_base.tar" -C "$(dirname "${BASE_DIR}")" "${BASE_NAME}" -C "${TMP}" hf_home
 fi
 if [[ "${WHAT}" == all || "${WHAT}" == jobfiles ]]; then
-    ssh "${NETID}@${SUBMIT_HOST}" "mkdir -p ~/simfoundry_chtc/logs"
-    scp "${CHTC_DIR}/train.sub" "${CHTC_DIR}/run_train_chtc.sh" "${CHTC_DIR}/../finetune_pi05.sh" \
+    ssh "${SSH_OPTS[@]}" "${NETID}@${SUBMIT_HOST}" "mkdir -p ~/simfoundry_chtc/logs"
+    scp "${SSH_OPTS[@]}" "${CHTC_DIR}/train.sub" "${CHTC_DIR}/run_train_chtc.sh" "${CHTC_DIR}/../finetune_pi05.sh" \
         "${NETID}@${SUBMIT_HOST}:~/simfoundry_chtc/"
 fi
 echo "Done. On ${SUBMIT_HOST}: cd ~/simfoundry_chtc && condor_submit train.sub dockerhub_user=tdu35"
